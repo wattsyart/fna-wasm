@@ -40,6 +40,10 @@ WORKDIR /emsdk
 RUN ./emsdk install latest
 RUN ./emsdk activate latest
 
+# For some reason, using bash 'source' or sh '.' has no impact when setting PATH,
+# so we have to do it manually by copying out the text and running it with ENV
+# here.
+#
 # RUN ./emsdk construct_env > vars.sh
 # RUN . ./vars.sh
 ENV PATH="/emsdk:/emsdk/upstream/emscripten:/emsdk/node/14.18.2_64bit/bin:${PATH}"
