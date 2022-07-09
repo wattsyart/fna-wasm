@@ -25,6 +25,10 @@ RUN echo "deb https://download.mono-project.com/repo/ubuntu stable-bionic main" 
 RUN apt update
 RUN apt install -y mono-devel
 
+# Install ninja (required by Uno.Wasm.Bootstrap)
+# See: https://github.com/unoplatform/Uno.Wasm.Bootstrap/blob/main/doc/runtime-execution-modes.md#required-configuration-for-aot-mixed-mode-or-static-linking-on-linux
+RUN apt-get install -y ninja-build
+
 # See: https://docs.microsoft.com/en-us/dotnet/core/install/linux-ubuntu#1804
 RUN wget https://packages.microsoft.com/config/ubuntu/18.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
 RUN dpkg -i packages-microsoft-prod.deb
