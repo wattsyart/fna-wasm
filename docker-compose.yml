@@ -7,3 +7,5 @@ services:
     image: fna-wasm-build
     ports:
       - "3030:8080"
+    volumes:
+      - ./dist:/var/output/bin/Release/net5.0/dist
