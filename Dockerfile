@@ -1,4 +1,8 @@
+# Automated FNA to WASM building, based on:
 # See: https://gist.github.com/TheSpydog/e94c8c23c01615a5a3b2cc1a0857415c
+
+# DOCKER_BUILDKIT=1 for use in CI pipelines.
+# See: https://docs.docker.com/develop/develop-images/build_enhancements/
 
 FROM ubuntu:18.04 AS fna-wasm-build
 
