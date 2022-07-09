@@ -8,15 +8,12 @@ FROM ubuntu:18.04 AS fna-wasm-build
 
 RUN apt-get update --fix-missing
 
-# Install dependencies
+# Install build dependencies
 RUN apt-get install -y wget
 RUN apt-get install -y git
 RUN apt-get install -y python3
 RUN apt-get install -y make
 RUN apt-get install -y cmake
-RUN apt-get install -y nodejs
-RUN apt-get install -y npm
-RUN npm install -g live-server
 
 # Install mono (required by Uno.Wasm.Bootstrap)
 RUN apt install -y gnupg ca-certificates
@@ -112,6 +109,9 @@ RUN /bin/bash -c 'chmod -R 777 /var/output'
 RUN dotnet build /var/output/WasmBuild.csproj -c Release
 
 # Host game
-WORKDIR /var/output
+RUN apt-get install -y nodejs
+RUN apt-get install -y npm
+RUN npm install -g live-server
+WORKDIR /var/output/bin/Release/net5.0/dist
 EXPOSE 8080
 CMD ["live-server"]
