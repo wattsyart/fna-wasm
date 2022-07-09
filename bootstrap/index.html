@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <script type="text/javascript" src="./require.js"></script>
+    <script type="text/javascript" src="./mono-config.js"></script>
+    <script type="text/javascript" src="./uno-config.js"></script>
+    <script type="text/javascript" src="./uno-bootstrap.js"></script>
+    <script type="text/javascript">
+        /* These functions are supposed to be included by passing
+         * -s DEFAULT_LIBRARY_FUNCS_TO_INCLUDE=[...] to the emcc linker,
+         * but MSBuild makes it impossible to do that. Instead I copied
+         * them from Emscripten's library.js directly into here. -caleb
+         */
+        function listenOnce(object, event, func) {
+          object.addEventListener(event, func, { 'once': true });
+        }
+        function autoResumeAudioContext(ctx, elements) {
+          if (!elements) {
+            elements = [document, document.getElementById('canvas')];
+          }
+          ['keydown', 'mousedown', 'touchstart'].forEach(function(event) {
+            elements.forEach(function(element) {
+              if (element) {
+                listenOnce(element, event, function() {
+                  if (ctx.state === 'suspended') ctx.resume();
+                });
+              }
+            });
+          });
+        }
+        function dynCallLegacy(sig, ptr, args) {
+          assert(('dynCall_' + sig) in Module, 'bad function pointer type - no table for sig \'' + sig + '\'');
+          if (args && args.length) {
+            // j (64-bit integer) must be passed in as two numbers [low 32, high 32].
+            assert(args.length === sig.substring(1).replace(/j/g, '--').length);
+          } else {
+            assert(sig.length == 1);
+          }
+          var f = Module["dynCall_" + sig];
+          return args && args.length ? f.apply(null, [ptr].concat(args)) : f.call(null, ptr);
+        }
+        function dynCall(sig, ptr, args) {
+          if (sig.indexOf('j') != -1) {
+            return dynCallLegacy(sig, ptr, args);
+          }
+          assert(wasmTable.get(ptr), 'missing table entry in dynCall: ' + ptr);
+          return wasmTable.get(ptr).apply(null, args)
+        }
+    </script>
+    <script async type="text/javascript" src="./dotnet.js"></script>
+    $(ADDITIONAL_CSS)
+    $(ADDITIONAL_HEAD)
+</head>
+<body>
+    <div id="uno-body" class="container-fluid uno-body">
+        <div class="uno-loader"
+             loading-position="bottom"
+             loading-alert="none">
+
+            <!-- Logo: change src to customize the logo -->
+            <img class="logo"
+                 src=""
+                 title="Uno is loading your application" />
+
+            <progress></progress>
+            <span class="alert"></span>
+        </div>
+    </div>
+    <canvas id="canvas"></canvas>
+    <script>
+        // This is required for SDL2!
+        Module.canvas = document.getElementById("canvas");
+    </script>
+    <noscript>
+        <p>This application requires Javascript and WebAssembly to be enabled.</p>
+    </noscript>
+</body>
+</html>

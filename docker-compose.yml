@@ -1,0 +1,9 @@
+version: "3"
+
+services:
+
+  fna-wasm:
+    build: .
+    image: fna-wasm-build
+    ports:
+      - "3030:8080"

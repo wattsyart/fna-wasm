@@ -1,0 +1,6 @@
+<linker>
+    <assembly fullname="FNA">
+      <namespace fullname="ObjCRuntime" />
+      <namespace fullname="Microsoft.Xna.Framework.Content" />
+    </assembly>
+</linker>
