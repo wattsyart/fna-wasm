@@ -1,4 +1,4 @@
-# Automatic FNA to WASM 
+# Automated FNA to WASM builds
 
 This project contains a simple "Blue Screen of Life" game built in FNA.
 
@@ -13,6 +13,6 @@ This takes the guess-work out of @TheSpyDog's excellent [FNA-to-WASM tutorial](h
 
 - Wait for the Docker container to finish building and boot up
 
-- Navigate to `http://localhost:3030/index.html` to run your game!
+- Navigate to `http://localhost:3030` to run your game!
 
 ![BSOL](/docs/bsol.png)
