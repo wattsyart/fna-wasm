@@ -107,5 +107,7 @@ RUN /bin/bash -c 'chmod -R 777 /var/output'
 # Build game
 RUN dotnet build /var/output/WasmBuild.csproj -c Release
 
+# Host game
+WORKDIR /var/output
 EXPOSE 8080
 CMD ["live-server"]
