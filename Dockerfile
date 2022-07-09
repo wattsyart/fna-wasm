@@ -36,7 +36,7 @@ RUN apt-get update; \
 RUN apt-get update; \
     apt-get install -y apt-transport-https && \
     apt-get update && \
-    apt-get install -y dotnet-runtime-5.0
+    apt-get install -y aspnetcore-runtime-5.0
 
 # See: https://emscripten.org/docs/getting_started/downloads.html
 RUN git clone https://github.com/emscripten-core/emsdk.git
