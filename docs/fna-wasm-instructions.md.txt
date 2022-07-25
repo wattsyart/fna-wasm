@@ -1,0 +1,317 @@
+## How to build your FNA game for WebAssembly
+
+**WARNING: This process is EXTREMELY experimental and not officially supported yet!**
+
+Thanks to the ongoing work on .NET WebAssembly support, it is now possible to build FNA games for the web!
+
+If you decide to give this a try, be sure to tell us about it in the [FNA Discord](https://discord.gg/fna-xna)! I'm happy to help if you run into problems or have any further questions that are not answered here.
+
+# The Basics
+
+**How does it work?**
+
+FNA browser games run on .NET 5 with the help of [Uno.Wasm.Bootstrap](https://github.com/unoplatform/Uno.Wasm.Bootstrap). As per usual, all of the platform-specific code on the native side is handled by SDL2. For the graphics backend we use FNA3D's OpenGL ES3 renderer, which Emscripten helpfully translates to WebGL 2.
+
+Just like all the other platforms FNA supports, the WebAssembly platform does not require a special version of FNA. It's just the regular old FNA.dll that you've come to know and love. Single-assembly portability, now on the web!
+
+In order to remain performant (and to statically link with the Emscripten-compiled native libraries), FNA browser games must be AOT compiled. However, reflection-heavy games are still feasible thanks to "mixed mode" compilation that enables the .NET interpreter on top of the AOT'd code, just for dynamic special cases!
+
+.NET's WebAssembly AOT support is still very much a WIP, so it's almost certain you'll run into runtime bugs. Thankfully there's almost always a workaround if you're willing to persevere, but still beware -- there be dragons.
+
+**What works?**
+* Graphics (via WebGL 2)
+* Sound Effects
+* Mouse / Keyboard / Gamepad Input
+* Asset loading (Content.Load<>, TitleContainer.OpenStream, File.Open)
+
+**What doesn't work?**
+* [Anything with threads.](https://github.com/unoplatform/Uno.Wasm.Bootstrap#threads-support) (XACT, threaded resource loading, etc.)
+* Calling `GraphicsDeviceManager.ApplyChanges()` in the game constructor. Because of [a bug in Emscripten](https://github.com/emscripten-ports/SDL2/issues/92), this will break mouse input.
+* APIs and assembly references that aren't compatible with .NET CoreCLR.
+* ContentReaders that use generics, such as `ListReader<char>`. (There is a workaround though, which I'll describe in the Q+A.)
+* WebGL 1, since FNA3D does not have a GLES2 renderer.
+* Probably a lot of other stuff.
+
+**What's untested?**
+* Video, since I can't get Theorafile to build with Emscripten...
+
+# Prereqs
+
+The first thing you'll need is a compatible build OS. Currently only Linux and [Windows 10 + WSL](https://docs.microsoft.com/en-us/windows/wsl/install-win10) are supported by Uno.Wasm.Bootstrap. I've personally been using WSL with Ubuntu 18.04 LTS.
+
+Next, [download, install, and set up Emscripten on Linux / your WSL partition](https://emscripten.org/docs/getting_started/downloads.html). **Don't** use a package manager! Use the officially recommended method of cloning from git!
+
+You will also need to install [.NET 5 on Linux/WSL](https://docs.microsoft.com/en-us/dotnet/core/install/linux).
+
+And finally, you'll need a basic FNA game to test with. I suggest you build the ol' reliable [Cornflower Blue sample app](https://gist.github.com/flibitijibibo/1ce4b7899b3cf1805a420330f0d2faf3#the-first-game-object) first to make sure everything's in order, before you try to build your own game for WebAssembly. You can do this part on Windows or on Linux.
+
+Now that's out of the way, let's build the fnalibs.
+
+# Building fnalibs
+
+EDIT: Thanks to clarvalon, we now have [automatically-built fnalibs](https://github.com/clarvalon/FNA-WASM-Build) that you can grab and use instead of building them yourself! But if you do want to build them manually, here's how you can do it.
+
+All of these steps must be done on Linux (or your WSL instance).
+```bash
+# First, make sure you've added the emsdk to your path, per the Emscripten instructions!
+
+# Create the fnalibs repo directory
+mkdir fnalibs
+cd fnalibs
+
+# SDL2
+git clone https://github.com/libsdl-org/SDL
+cd SDL
+mkdir emscripten-build
+cd emscripten-build
+emconfigure ../configure --host=wasm32-unknown-emscripten --disable-assembly --disable-threads --disable-cpuinfo CFLAGS="-O2 -Wno-warn-absolute-paths -Wdeclaration-after-statement -Werror=declaration-after-statement" --prefix="$PWD/emscripten-sdl2-installed"
+emmake make
+emmake make install
+cd ../..
+
+# FNA3D
+git clone --recursive https://github.com/FNA-XNA/FNA3D
+cd FNA3D
+mkdir build
+cd build
+emcmake cmake .. -DSDL2_INCLUDE_DIRS=<path-to-SDL>/include -DSDL2_LIBRARIES=<path-to-SDL>/emscripten-build/emscripten-sdl2-installed/lib/libSDL2.a
+emmake make
+cd ../..
+
+# FAudio
+git clone https://github.com/FNA-XNA/FAudio
+cd FAudio
+mkdir build
+cd build
+emcmake cmake .. -DSDL2_INCLUDE_DIRS=<path-to-SDL>/include -DSDL2_LIBRARIES=<path-to-SDL>/emscripten-build/emscripten-sdl2-installed/lib/libSDL2.a
+emmake make
+cd ../..
+
+# Theorafile
+# Uh, instructions coming soon...?
+```
+
+Now that you have all your libraries, it's time to copy them over to your FNA game project directory, like so:
+```bash
+# Assuming WSL, remove the /mnt/c/Users/<yourname> if you're running native Linux.
+cp ./SDL/emscripten-build/emscripten-sdl2-installed/lib/libSDL2.a /mnt/c/Users/<yourname>/<path-to-your-project>/SDL2.a
+cp ./FNA3D/build/libFNA3D.a /mnt/c/Users/<yourname>/<path-to-your-project>/FNA3D.a
+cp ./FNA3D/build/libmojoshader.a /mnt/c/Users/<yourname>/<path-to-your-project>/libmojoshader.a
+cp ./FAudio/build/libFAudio.a /mnt/c/Users/<yourname>/<path-to-your-project>/FAudio.a
+```
+
+Notice something very important in that command -- we are _renaming_ the SDL2, FNA3D, and FAudio libraries when we copy them! (e.g. `libSDL2.a` to just `SDL2.a`) This is unfortunately necessary for DllImport to work correctly.
+
+That's it for the fnalibs! Now to set up the project.
+
+# Setting up the C# project
+
+In your game's project directory, make a new .csproj file and copy-paste the following into it:
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net5.0</TargetFramework>
+    <WasmShellMonoRuntimeExecutionMode>InterpreterAndAOT</WasmShellMonoRuntimeExecutionMode>
+    <WasmShellIndexHtmlPath>index.html</WasmShellIndexHtmlPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <LinkerDescriptor Include="LinkerConfig.xml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="FAudio.a" />
+    <Content Include="FNA3D.a" />
+    <Content Include="libmojoshader.a" />
+    <Content Include="SDL2.a" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Uno.Wasm.Bootstrap" Version="2.0.2" />
+    <PackageReference Include="Uno.Wasm.Bootstrap.DevServer" Version="2.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FNA\FNA.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <WasmShellExtraEmccFlags Include="-s MIN_WEBGL_VERSION=2 -s MAX_WEBGL_VERSION=2" />
+  </ItemGroup>
+
+</Project>
+```
+Much of this should be self-explanatory, but for more information on what these various attributes do, please see the very descriptive [Uno.Wasm.Bootstrap readme](https://github.com/unoplatform/Uno.Wasm.Bootstrap#readme).
+
+Additionally we need to create the index.html file that's referenced in the .csproj:
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <script type="text/javascript" src="./require.js"></script>
+    <script type="text/javascript" src="./mono-config.js"></script>
+    <script type="text/javascript" src="./uno-config.js"></script>
+    <script type="text/javascript" src="./uno-bootstrap.js"></script>
+    <script type="text/javascript">
+        /* These functions are supposed to be included by passing
+         * -s DEFAULT_LIBRARY_FUNCS_TO_INCLUDE=[...] to the emcc linker,
+         * but MSBuild makes it impossible to do that. Instead I copied
+         * them from Emscripten's library.js directly into here. -caleb
+         */
+        function listenOnce(object, event, func) {
+          object.addEventListener(event, func, { 'once': true });
+        }
+        function autoResumeAudioContext(ctx, elements) {
+          if (!elements) {
+            elements = [document, document.getElementById('canvas')];
+          }
+          ['keydown', 'mousedown', 'touchstart'].forEach(function(event) {
+            elements.forEach(function(element) {
+              if (element) {
+                listenOnce(element, event, function() {
+                  if (ctx.state === 'suspended') ctx.resume();
+                });
+              }
+            });
+          });
+        }
+        function dynCallLegacy(sig, ptr, args) {
+          assert(('dynCall_' + sig) in Module, 'bad function pointer type - no table for sig \'' + sig + '\'');
+          if (args && args.length) {
+            // j (64-bit integer) must be passed in as two numbers [low 32, high 32].
+            assert(args.length === sig.substring(1).replace(/j/g, '--').length);
+          } else {
+            assert(sig.length == 1);
+          }
+          var f = Module["dynCall_" + sig];
+          return args && args.length ? f.apply(null, [ptr].concat(args)) : f.call(null, ptr);
+        }
+        function dynCall(sig, ptr, args) {
+          if (sig.indexOf('j') != -1) {
+            return dynCallLegacy(sig, ptr, args);
+          }
+          assert(wasmTable.get(ptr), 'missing table entry in dynCall: ' + ptr);
+          return wasmTable.get(ptr).apply(null, args)
+        }
+    </script>
+    <script async type="text/javascript" src="./dotnet.js"></script>
+    $(ADDITIONAL_CSS)
+    $(ADDITIONAL_HEAD)
+</head>
+<body>
+    <div id="uno-body" class="container-fluid uno-body">
+        <div class="uno-loader"
+             loading-position="bottom"
+             loading-alert="none">
+
+            <!-- Logo: change src to customize the logo -->
+            <img class="logo"
+                 src=""
+                 title="Uno is loading your application" />
+
+            <progress></progress>
+            <span class="alert"></span>
+        </div>
+    </div>
+    <canvas id="canvas"></canvas>
+    <script>
+        // This is required for SDL2!
+        Module.canvas = document.getElementById("canvas");
+    </script>
+    <noscript>
+        <p>This application requires Javascript and WebAssembly to be enabled.</p>
+    </noscript>
+</body>
+</html>
+```
+And finally, we need our [LinkerConfig.xml](https://github.com/mono/linker/blob/main/docs/data-formats.md#xml-examples) file, which makes sure that the .NET linker doesn't get too excited and rip out stuff we actually use.
+```
+<linker>
+    <assembly fullname="FNA">
+      <namespace fullname="ObjCRuntime" />
+      <namespace fullname="Microsoft.Xna.Framework.Content" />
+    </assembly>
+</linker>
+```
+
+And with that, we're done with the setup!
+
+# Building the game
+
+To run your game, you can either use Visual Studio or call `msbuild /t:restore` then `msbuild` directly in the command line in your project directory. I recommend the latter, as it gives you far more descriptive info about the build, so if something goes wrong you'll get an actual error message.
+
+You may encounter a build error that starts with: "The Windows subsystem for Linux dotnet environment may not be properly setup, and you may need to run the environment setup script." If you see this, just follow the instructions it gives you.
+
+Once the build is complete (which might take a while), we need to test the game!
+
+If you used the VS IDE to build+run it, it will automatically start up a local server. Don't put too much faith in it though. Its server has a habit of caching and running old builds, which can lead to a lot of confusion and frustration when debugging. (Speaking from experience here...)
+
+Instead, I recommend starting up a local server manually. My personal favorite is [live-server](https://www.npmjs.com/package/live-server), but you're welcome to use whatever you like. (I know `python -m http.server` is another popular one.) The path you'll want to serve on your server is `./bin/Debug/net5.0/dist/`.
+
+Finally, open up the browser and visit the address given by your server. With luck, you'll see the Cornflower Blue screen of life!
+
+## Content
+
+To include Content in your game, add this to your WasmShellExtraEmccFlags Include string in the .csproj file:
+`--preload-file /mnt/c/Users/<yourname>/<path-to-your-project>/Content@Content`
+
+(If you're on Linux, remove the /mnt/ junk.)
+
+This will compile your whole Content directory into an asset bundle called "dotnet.data". Note that the path is relative to WSL. The "@Content" part of the string [re-maps the directory's name in the virtual file system](https://emscripten.org/docs/porting/files/packaging_files.html#packaging-files-packaged-file-location) so that we can use "Content/" as our root directory, just like on PC builds.
+
+By default, Emscripten will generate the dotnet.data file inside the `bin/dist/package_xxx` folder, but we need it to be in `bin/dist/` instead. To fix this, add this little MSBuild task into your .csproj. This automatically moves the content bundle to where it's supposed to go, saving you the trouble of manually dragging it into the right directory.
+```xml
+  <Target Name="MoveDataFile" AfterTargets="BuildDist">
+    <Move SourceFiles="$(WasmShellOutputPackagePath)\dotnet.data" DestinationFolder="$(OutDir)dist" />
+  </Target>
+```
+
+Try adding some text files, images, or audio files into your Content directory and build! See what happens!
+
+## Q+A
+
+**My builds take forever. Is that normal?**
+
+Yup... I've seen builds take upwards of 15 minutes for large projects. For smaller games, you should expect build times along the lines of 1-5 minutes, which is much more reasonable. But of course you'll probably want to stick with PC builds for rapid, iterative development.
+
+**My project hit a build error, but it doesn't actually say what the error is...?**
+
+If you're using Visual Studio, try using msbuild on the command line instead. It will be much more verbose.
+
+If the error came relatively early in the build cycle, try re-building. In rare cases, msbuild only spews the error message on the second run.
+
+If the error came very late in the build cycle, it's probably a linker error. Its output can be pretty cryptic sometimes, but if you study the msbuild output hard enough it might contain some clues as to what's gone wrong. If you're totally stumped, ask for help on the Discord.
+
+**Why can't we just use the Emscripten port of SDL2?**
+
+Because the Emscripten version of SDL2 is forked from upstream for no apparent reason and is perpetually out of date. As a result it's currently incompatible with FNA.
+
+**Why am I getting a mysterious "Uncaught: (some number)" exception without a stack trace in the JS console?**
+
+Most likely there's something in your code (or in FNA) that has the following structure:
+```
+try { Foo(); }
+catch (SomeSpecificException e) { /* deal with the exception */ }
+```
+without a generic `catch` block at the end that can handle any exception. Foo() might not be throwing the exception you expected to catch, and as a result the exception isn't properly caught by anything. This causes the .NET runtime to freak out, resulting in the indescipherable message you see here. Unfortunately, without better debugging support, the best thing to do is just start plopping Console.WriteLine statements around the codebase to see where it goes haywire.
+
+**How do I work around the generic ContentReader type limitation?**
+
+Modify FNA's source, of course! Print the name of the type it's trying to load so you know what it's called internally (see https://github.com/FNA-XNA/FNA/blob/master/src/Content/ContentTypeReaderManager.cs#L196) and then edit the code like so:
+```
+Type l_readerType = Type.GetType(readerTypeString);
+if (l_readerType == null)
+{
+    if (readerTypeString == "The.Type.You.Want`1[[whatever]]")
+    {
+        l_readerType = typeof(The.Type.You.Want<whatever>);
+    }
+}
+```
